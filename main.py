@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 from flask import Flask, request, Response, make_response, send_from_directory
 import threading
-import os
 
 app = Flask(__name__)
 frame = None
@@ -77,62 +76,6 @@ def show_frames():
         cam.close()
     # No cv2.destroyAllWindows() since no window is created
 
-def generate_self_signed_cert(cert_file, key_file):
-    from cryptography import x509
-    from cryptography.x509.oid import NameOID
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.backends import default_backend
-    import datetime
-
-    # Generate private key
-    key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=default_backend()
-    )
-    # Write private key to file
-    with open(key_file, "wb") as f:
-        f.write(key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
-    # Generate self-signed cert
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"State"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, u"Local"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"iPhoneWebcam"),
-        x509.NameAttribute(NameOID.COMMON_NAME, u"localhost"),
-    ])
-    cert = x509.CertificateBuilder().subject_name(
-        subject
-    ).issuer_name(
-        issuer
-    ).public_key(
-        key.public_key()
-    ).serial_number(
-        x509.random_serial_number()
-    ).not_valid_before(
-        datetime.datetime.utcnow()
-    ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=365)
-    ).add_extension(
-        x509.SubjectAlternativeName([
-            x509.DNSName(u"localhost")
-        ]),
-        critical=False,
-    ).sign(key, hashes.SHA256(), default_backend())
-    # Write cert to file
-    with open(cert_file, "wb") as f:
-        f.write(cert.public_bytes(serialization.Encoding.PEM))
-
 if __name__ == '__main__':
-    cert_file = 'cert.pem'
-    key_file = 'key.pem'
-    if not (os.path.exists(cert_file) and os.path.exists(key_file)):
-        print('Generating self-signed certificate...')
-        generate_self_signed_cert(cert_file, key_file)
     threading.Thread(target=show_frames, daemon=True).start()
-    app.run(host='0.0.0.0', port=5000, ssl_context=(cert_file, key_file))
+    app.run(host='0.0.0.0', port=5000, ssl_context=('cert.pem', 'key.pem'))

@@ -37,25 +37,9 @@
     let currentWidth = 1280;
     let currentHeight = 720;
     let useWebP = false;
-    let SERVER_URL = '';
 
-    // Load server address from CRED.json, fallback to current hostname
-    async function loadServerAddress() {
-      try {
-        const resp = await fetch('CRED.json');
-        const cred = await resp.json();
-        if (cred && cred.SERVER_ADDRESS) {
-          SERVER_URL = `https://${cred.SERVER_ADDRESS}:5000/upload`;
-        } else {
-          throw new Error('CRED.json missing SERVER_ADDRESS');
-        }
-      } catch (e) {
-        // Fallback: use current page's hostname
-        const host = window.location.hostname;
-        SERVER_URL = `https://${host}:5000/upload`;
-        status.textContent = 'Using default server address.';
-      }
-    }
+    // TODO: Replace with your computer's local IP address
+    const SERVER_URL = 'https://192.168.1.174:5000/upload';
 
     async function checkWebPSupport() {
       // Test if WebP is supported by the browser
@@ -78,13 +62,13 @@
             width: { ideal: w },
             height: { ideal: h }
           },
-          audio: false // ensure audio is not requested
+          audio: false
         });
         video.srcObject = stream;
         cameraStarted = true;
         status.textContent = `Camera started at ${w}x${h}. Ready to stream.`;
       } catch (err) {
-        status.textContent = 'Camera access denied or not available.';
+        status.textContent = 'Camera or microphone access denied or not available.';
       }
     }
 
@@ -187,7 +171,6 @@
 
     // On load, check for WebP support
     (async () => {
-      await loadServerAddress();
       useWebP = await checkWebPSupport();
     })();
   </script>
