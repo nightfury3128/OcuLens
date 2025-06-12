@@ -14,7 +14,6 @@ Use your iPhone as a high-quality wireless webcam for your Windows PC, streaming
 
 ### 1. Install Required Software
 These are one-time installations:
-- Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
 - Install [OBS Studio](https://obsproject.com/)
 
 ### 2. Run the Webcam Server

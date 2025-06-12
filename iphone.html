@@ -7,11 +7,17 @@
     body { text-align: center; font-family: sans-serif; }
     video { width: 90vw; max-width: 480px; border: 2px solid #333; border-radius: 8px; }
     button { margin-top: 16px; padding: 10px 20px; font-size: 1.2em; }
+    select { margin: 5px; padding: 5px; }
   </style>
 </head>
 <body>
   <h2>iPhone Webcam Streamer</h2>
   <video id="video" autoplay playsinline></video><br>
+  <label for="camera">Camera:</label>
+  <select id="camera">
+    <option value="">Loading cameras...</option>
+  </select>
+  <br>
   <label for="resolution">Resolution:</label>
   <select id="resolution">
     <option value="3840x2160">3840x2160 (4K)</option>
@@ -27,19 +33,92 @@
     const startBtn = document.getElementById('start');
     const status = document.getElementById('status');
     const resolutionSelect = document.getElementById('resolution');
+    const cameraSelect = document.getElementById('camera');
     const fpsDisplay = document.getElementById('fpsDisplay');
     let streaming = false;
     let cameraStarted = false;
     let uploading = false;
     let lastFrameTime = 0;
     let frameCount = 0;
-    let fpsTimer = null;
-    let currentWidth = 1280;
+    let fpsTimer = null;    let currentWidth = 1280;
     let currentHeight = 720;
     let useWebP = false;
+    let wakeLock = null;
+    let reconnectTimer = null;
+    let streamReconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 5;
 
-    // TODO: Replace with your computer's local IP address
-    const SERVER_URL = 'https://192.168.1.174:5000/upload';
+    // Function to keep screen awake
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Wake Lock is active');
+                wakeLock.addEventListener('release', () => {
+                    console.log('Wake Lock was released');
+                    if (streaming) {
+                        // Try to reacquire wake lock if we're still streaming
+                        requestWakeLock();
+                    }
+                });
+            } else {
+                console.log('Wake Lock API not supported');
+            }
+        } catch (err) {
+            console.error(`${err.name}, ${err.message}`);
+        }
+    }
+
+    // Function to release wake lock
+    async function releaseWakeLock() {
+        if (wakeLock) {
+            try {
+                await wakeLock.release();
+                wakeLock = null;
+            } catch (err) {
+                console.error(`${err.name}, ${err.message}`);
+            }
+        }
+    }
+
+    // Handle visibility change
+    document.addEventListener('visibilitychange', async () => {
+        if (streaming) {
+            if (document.visibilityState === 'visible') {
+                await requestWakeLock();
+                if (!cameraStarted) {
+                    await startCamera();
+                }
+            }
+        }
+    });
+
+    // Automatically get the server URL from the current page
+    const SERVER_URL = window.location.href.replace(/\/$/, '') + '/upload';
+
+    // Get available cameras
+    async function getCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter(device => device.kind === 'videoinput');
+        cameraSelect.innerHTML = cameras.map(camera => 
+          `<option value="${camera.deviceId}">${camera.label || `Camera ${cameras.indexOf(camera) + 1}`}</option>`
+        ).join('');
+      } catch (err) {
+        console.error('Error getting cameras:', err);
+        status.textContent = 'Error loading cameras';
+      }
+    }
+
+    // Request camera permission to get labels
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+        getCameras();
+      })
+      .catch(() => {
+        status.textContent = 'Camera permission denied';
+      });
 
     async function checkWebPSupport() {
       // Test if WebP is supported by the browser
@@ -55,12 +134,11 @@
       try {
         const [w, h] = resolutionSelect.value.split('x').map(Number);
         currentWidth = w;
-        currentHeight = h;
-        const stream = await navigator.mediaDevices.getUserMedia({
+        currentHeight = h;        const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { exact: 'environment' },
             width: { ideal: w },
-            height: { ideal: h }
+            height: { ideal: h },
+            deviceId: { exact: cameraSelect.value }
           },
           audio: false
         });
@@ -141,7 +219,17 @@
       }
     };
 
-    startBtn.onclick = async () => {
+    cameraSelect.onchange = async () => {
+      if (streaming) {
+        streaming = false;
+        startBtn.textContent = 'Start Streaming';
+        status.textContent = 'Restarting camera...';
+        await startCamera();
+        streaming = true;
+        startBtn.textContent = 'Stop Streaming';
+        sendFrame();
+      }
+    };    startBtn.onclick = async () => {
       if (!streaming) {
         if (!cameraStarted) {
           status.textContent = 'Requesting camera access...';
@@ -150,17 +238,50 @@
         }
         streaming = true;
         startBtn.textContent = 'Stop Streaming';
+        
+        // Request wake lock when streaming starts
+        await requestWakeLock();
+        
+        // Set up auto-reconnect monitoring
+        streamReconnectAttempts = 0;
+        if (reconnectTimer) clearInterval(reconnectTimer);
+        reconnectTimer = setInterval(async () => {
+          if (streaming && !cameraStarted && streamReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            streamReconnectAttempts++;
+            status.textContent = `Attempting to reconnect... (${streamReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+            await startCamera();
+            if (cameraStarted) {
+              streamReconnectAttempts = 0;
+              status.textContent = 'Camera reconnected successfully.';
+            }
+          } else if (streamReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            status.textContent = 'Max reconnection attempts reached. Please restart streaming.';
+            streaming = false;
+            startBtn.textContent = 'Start Streaming';
+            clearInterval(reconnectTimer);
+          }
+        }, 5000);  // Check every 5 seconds
+
         sendFrame();
         if (!fpsTimer) {
           fpsTimer = setInterval(() => {
             fpsDisplay.textContent = `FPS: ${frameCount}`;
             frameCount = 0;
           }, 1000);
-        }
-      } else {
+        }      } else {
         streaming = false;
         startBtn.textContent = 'Start Streaming';
         status.textContent = 'Stopped.';
+        
+        // Release wake lock when stopping
+        await releaseWakeLock();
+        
+        // Clear reconnect timer
+        if (reconnectTimer) {
+            clearInterval(reconnectTimer);
+            reconnectTimer = null;
+        }
+        
         if (fpsTimer) {
           clearInterval(fpsTimer);
           fpsTimer = null;
