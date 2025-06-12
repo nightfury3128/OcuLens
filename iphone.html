@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>iPhone Webcam Streamer</title>
+  <style>
+    body { text-align: center; font-family: sans-serif; }
+    video { width: 90vw; max-width: 480px; border: 2px solid #333; border-radius: 8px; }
+    button { margin-top: 16px; padding: 10px 20px; font-size: 1.2em; }
+  </style>
+</head>
+<body>
+  <h2>iPhone Webcam Streamer</h2>
+  <video id="video" autoplay playsinline></video><br>
+  <label for="resolution">Resolution:</label>
+  <select id="resolution">
+    <option value="3840x2160">3840x2160 (4K)</option>
+    <option value="1280x720">1280x720</option>
+    <option value="960x540">960x540</option>
+    <option value="640x360">640x360</option>
+  </select>
+  <button id="start">Start Streaming</button>
+  <p id="status"></p>
+  <p id="fpsDisplay"></p>
+  <script>
+    const video = document.getElementById('video');
+    const startBtn = document.getElementById('start');
+    const status = document.getElementById('status');
+    const resolutionSelect = document.getElementById('resolution');
+    const fpsDisplay = document.getElementById('fpsDisplay');
+    let streaming = false;
+    let cameraStarted = false;
+    let uploading = false;
+    let lastFrameTime = 0;
+    let frameCount = 0;
+    let fpsTimer = null;
+    let currentWidth = 1280;
+    let currentHeight = 720;
+    let useWebP = false;
+    let SERVER_URL = '';
+
+    // Load server address from CRED.json, fallback to current hostname
+    async function loadServerAddress() {
+      try {
+        const resp = await fetch('CRED.json');
+        const cred = await resp.json();
+        if (cred && cred.SERVER_ADDRESS) {
+          SERVER_URL = `https://${cred.SERVER_ADDRESS}:5000/upload`;
+        } else {
+          throw new Error('CRED.json missing SERVER_ADDRESS');
+        }
+      } catch (e) {
+        // Fallback: use current page's hostname
+        const host = window.location.hostname;
+        SERVER_URL = `https://${host}:5000/upload`;
+        status.textContent = 'Using default server address.';
+      }
+    }
+
+    async function checkWebPSupport() {
+      // Test if WebP is supported by the browser
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(img.width === 1);
+        img.onerror = () => resolve(false);
+        img.src = "data:image/webp;base64,UklGRiIAAABXRUJQVlA4TAYAAAAvAAAAAAfQ//73v/+BiOh/AAA=";
+      });
+    }
+
+    async function startCamera() {
+      try {
+        const [w, h] = resolutionSelect.value.split('x').map(Number);
+        currentWidth = w;
+        currentHeight = h;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { exact: 'environment' },
+            width: { ideal: w },
+            height: { ideal: h }
+          },
+          audio: false // ensure audio is not requested
+        });
+        video.srcObject = stream;
+        cameraStarted = true;
+        status.textContent = `Camera started at ${w}x${h}. Ready to stream.`;
+      } catch (err) {
+        status.textContent = 'Camera access denied or not available.';
+      }
+    }
+
+    async function sendFrame() {
+      if (!streaming || !cameraStarted || uploading) return;
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        status.textContent = 'Waiting for camera...';
+        setTimeout(sendFrame, 100);
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = currentWidth;
+      canvas.height = currentHeight;
+      const ctx = canvas.getContext('2d');
+      // If the video is portrait (height > width), rotate to landscape
+      if (video.videoHeight > video.videoWidth) {
+        ctx.save();
+        ctx.translate(currentWidth / 2, currentHeight / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.drawImage(video, -currentHeight / 2, -currentWidth / 2, currentHeight, currentWidth);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, currentWidth, currentHeight);
+      }
+      uploading = true;
+      let blob;
+      if (useWebP) {
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.5));
+      } else {
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.3));
+      }
+      if (!blob) {
+        status.textContent = 'No frame to send.';
+        uploading = false;
+        setTimeout(sendFrame, 100);
+        return;
+      }
+      try {
+        await fetch(SERVER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: blob
+        });
+        status.textContent = 'Streaming...';
+        // FPS calculation
+        frameCount++;
+        const now = performance.now();
+        if (!lastFrameTime) lastFrameTime = now;
+        if (now - lastFrameTime >= 1000) {
+          fpsDisplay.textContent = `FPS: ${frameCount}`;
+          frameCount = 0;
+          lastFrameTime = now;
+        }
+      } catch (e) {
+        status.textContent = 'Failed to send frame.';
+      }
+      uploading = false;
+      if (streaming) sendFrame();
+    }
+
+    resolutionSelect.onchange = async () => {
+      if (streaming) {
+        streaming = false;
+        startBtn.textContent = 'Start Streaming';
+        status.textContent = 'Restarting camera...';
+        await startCamera();
+        streaming = true;
+        startBtn.textContent = 'Stop Streaming';
+        sendFrame();
+      }
+    };
+
+    startBtn.onclick = async () => {
+      if (!streaming) {
+        if (!cameraStarted) {
+          status.textContent = 'Requesting camera access...';
+          await startCamera();
+          if (!cameraStarted) return;
+        }
+        streaming = true;
+        startBtn.textContent = 'Stop Streaming';
+        sendFrame();
+        if (!fpsTimer) {
+          fpsTimer = setInterval(() => {
+            fpsDisplay.textContent = `FPS: ${frameCount}`;
+            frameCount = 0;
+          }, 1000);
+        }
+      } else {
+        streaming = false;
+        startBtn.textContent = 'Start Streaming';
+        status.textContent = 'Stopped.';
+        if (fpsTimer) {
+          clearInterval(fpsTimer);
+          fpsTimer = null;
+        }
+        fpsDisplay.textContent = '';
+      }
+    };
+
+    // On load, check for WebP support
+    (async () => {
+      await loadServerAddress();
+      useWebP = await checkWebPSupport();
+    })();
+  </script>
+</body>
+</html>
