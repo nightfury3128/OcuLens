@@ -1,5 +1,9 @@
-flask
-numpy
-opencv-python
-pyvirtualcam
-cryptography
+flask==3.0.0
+flask-sock==0.7.0
+numpy==1.26.0
+opencv-python==4.8.1
+pyvirtualcam==0.10.0
+cryptography==41.0.0
+websockets==11.0.0
+pystray==0.19.0
+pillow==10.0.0

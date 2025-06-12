@@ -6,36 +6,27 @@ Use your iPhone as a high-quality wireless webcam for your Windows PC, streaming
 - Stream video from your iPhone camera to your PC over Wi-Fi
 - Choose from 4K, 720p, 540p, or 360p resolutions
 - Real-time performance with minimal lag
-- No coding required for setup
-- Docker support for easy background running
+- Zero setup - just double-click and go!
+- Automatic virtual camera setup
 - Secure HTTPS connection (self-signed certs)
 
 ## Quick Start (No Coding Required)
 
-### 1. Download and Install
-- Download this folder to your PC.
-- Make sure you have [Python 3.11+](https://www.python.org/downloads/) installed (if not using Docker).
+### 1. Install Required Software
+These are one-time installations:
+- Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+- Install [OBS Studio](https://obsproject.com/)
 
-### 2. (Recommended) Run with Docker
-1. Open PowerShell in this folder.
-2. Build the Docker image:
-   ```powershell
-   docker build -t iphone-webcam .
-   ```
-3. Run the server:
-   ```powershell
-   docker run -d -p 5000:5000 --name iphone-webcam iphone-webcam
-   ```
+### 2. Run the Webcam Server
+1. Download this folder to your PC
+2. Double-click `start.bat`
+3. Follow the instructions shown in the window
 
-### 3. Or Run with Python
-1. Install dependencies:
-   ```powershell
-   pip install flask numpy opencv-python pyvirtualcam
-   ```
-2. Start the server:
-   ```powershell
-   python main.py
-   ```
+That's it! The script will:
+- Start the server automatically
+- Show you exactly what to do on your iPhone
+- Tell you how to use it in OBS
+- Keep running in the background
 
 ### 4. Connect Your iPhone
 1. On your iPhone, connect to the same Wi-Fi as your PC.
