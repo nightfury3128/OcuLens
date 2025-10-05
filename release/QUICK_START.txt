@@ -1,0 +1,49 @@
+# iPhone Webcam - Quick Start Guide
+
+## 🚀 Getting Started (3 Easy Steps)
+
+### Step 1: Run the Application
+- Double-click `iPhone-Webcam.exe`
+- Windows may show a security warning - click "More info" then "Run anyway"
+
+### Step 2: Connect Your iPhone
+- A browser window will open automatically
+- Scan the QR code displayed with your iPhone camera
+- OR manually type the URL shown in your iPhone's Safari browser
+
+### Step 3: Start Streaming
+- Allow camera access when prompted on your iPhone
+- Your iPhone camera will now appear as a webcam on your computer
+- Use it in Zoom, Teams, OBS, or any video application
+
+## 🎥 Using with Video Applications
+
+### OBS Studio
+1. Add a "Video Capture Device" source
+2. Select "OBS Virtual Camera" as the device
+3. Your iPhone feed will appear
+
+### Zoom/Teams
+1. Go to video settings
+2. Select "OBS Virtual Camera" as your camera
+3. Your iPhone is now your webcam!
+
+## 🛠️ Troubleshooting
+
+**Can't connect?**
+- Make sure your iPhone and computer are on the same WiFi network
+- Try refreshing the page on your iPhone
+
+**Performance issues?**
+- Close other applications using your camera
+- Ensure good WiFi signal strength
+
+**Security warning?**
+- This is normal for new applications
+- The app is safe - it only creates a local server
+
+## 🆘 Need Help?
+Visit: https://github.com/nightfury3128/iphoneWebCam/issues
+
+---
+*iPhone Webcam v2.0 - Transform your iPhone into a wireless webcam*
