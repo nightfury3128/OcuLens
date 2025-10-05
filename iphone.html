@@ -25,6 +25,22 @@
     <option value="960x540">960x540</option>
     <option value="640x360">640x360</option>
   </select>
+  <br>
+  <label for="quality">Quality:</label>
+  <select id="quality">
+    <option value="high">High (0.8)</option>
+    <option value="medium" selected>Medium (0.7)</option>
+    <option value="low">Low (0.5)</option>
+    <option value="auto">Auto (Adaptive)</option>
+  </select>
+  <br>
+  <label for="maxFps">Max FPS:</label>
+  <select id="maxFps">
+    <option value="30" selected>30 FPS</option>
+    <option value="24">24 FPS</option>
+    <option value="15">15 FPS</option>
+    <option value="10">10 FPS</option>
+  </select>
   <button id="start">Start Streaming</button>
   <p id="status"></p>
   <p id="fpsDisplay"></p>
@@ -35,6 +51,8 @@
     const resolutionSelect = document.getElementById('resolution');
     const cameraSelect = document.getElementById('camera');
     const fpsDisplay = document.getElementById('fpsDisplay');
+    const qualitySelect = document.getElementById('quality');
+    const maxFpsSelect = document.getElementById('maxFps');
     let streaming = false;
     let cameraStarted = false;
     let uploading = false;
@@ -47,6 +65,17 @@
     let reconnectTimer = null;
     let streamReconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
+    
+    // Network efficiency variables
+    let adaptiveQuality = 0.7;
+    let targetFPS = 30;
+    let currentFPS = 30;
+    let networkLatency = 0;
+    let frameDropCount = 0;
+    let lastSuccessTime = Date.now();
+    let frameSkipCounter = 0;
+    let compressionLevel = 0.7;
+    let dynamicResolution = false;
 
     // Function to keep screen awake
     async function requestWakeLock() {
@@ -95,6 +124,38 @@
 
     // Automatically get the server URL from the current page
     const SERVER_URL = window.location.href.replace(/\/$/, '') + '/upload';
+    
+    // Network monitoring and adaptive quality
+    function monitorNetworkPerformance(responseTime) {
+      networkLatency = responseTime;
+      
+      // Adaptive quality based on network performance
+      if (responseTime > 1000) {
+        // High latency - reduce quality and fps
+        adaptiveQuality = Math.max(0.3, adaptiveQuality - 0.1);
+        targetFPS = Math.max(10, targetFPS - 2);
+        compressionLevel = Math.max(0.3, compressionLevel - 0.1);
+      } else if (responseTime < 200) {
+        // Good connection - gradually increase quality
+        adaptiveQuality = Math.min(0.8, adaptiveQuality + 0.05);
+        targetFPS = Math.min(30, targetFPS + 1);
+        compressionLevel = Math.min(0.8, compressionLevel + 0.05);
+      }
+      
+      // Dynamic resolution adjustment for very poor connections
+      if (responseTime > 2000 && !dynamicResolution) {
+        dynamicResolution = true;
+        currentWidth = Math.max(320, Math.floor(currentWidth * 0.7));
+        currentHeight = Math.max(240, Math.floor(currentHeight * 0.7));
+        console.log(`Reduced resolution to ${currentWidth}x${currentHeight} due to poor connection`);
+      } else if (responseTime < 300 && dynamicResolution) {
+        dynamicResolution = false;
+        const [w, h] = resolutionSelect.value.split('x').map(Number);
+        currentWidth = w;
+        currentHeight = h;
+        console.log(`Restored resolution to ${currentWidth}x${currentHeight}`);
+      }
+    }
 
     // Get available cameras
     async function getCameras() {
@@ -157,10 +218,31 @@
         setTimeout(sendFrame, 100);
         return;
       }
+      
+      // Adaptive frame skipping based on target FPS
+      const frameInterval = 1000 / targetFPS;
+      const timeSinceLastFrame = Date.now() - lastSuccessTime;
+      if (timeSinceLastFrame < frameInterval) {
+        setTimeout(sendFrame, frameInterval - timeSinceLastFrame);
+        return;
+      }
+      
+      // Skip frames if network is struggling
+      frameSkipCounter++;
+      if (networkLatency > 500 && frameSkipCounter % 2 === 0) {
+        setTimeout(sendFrame, 50);
+        return;
+      }
+      
       const canvas = document.createElement('canvas');
       canvas.width = currentWidth;
       canvas.height = currentHeight;
       const ctx = canvas.getContext('2d');
+      
+      // Enable image smoothing for better compression
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      
       // If the video is portrait (height > width), rotate to landscape
       if (video.videoHeight > video.videoWidth) {
         ctx.save();
@@ -171,41 +253,93 @@
       } else {
         ctx.drawImage(video, 0, 0, currentWidth, currentHeight);
       }
+      
       uploading = true;
+      const startTime = Date.now();
+      
       let blob;
       if (useWebP) {
-        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.5));
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', adaptiveQuality));
       } else {
-        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.3));
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', compressionLevel));
       }
+      
       if (!blob) {
         status.textContent = 'No frame to send.';
         uploading = false;
         setTimeout(sendFrame, 100);
         return;
       }
+      
       try {
-        await fetch(SERVER_URL, {
+        const response = await fetch(SERVER_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: blob
+          headers: { 
+            'Content-Type': 'application/octet-stream',
+            'Connection': 'keep-alive'
+          },
+          body: blob,
+          signal: AbortSignal.timeout(5000) // 5 second timeout
         });
-        status.textContent = 'Streaming...';
+        
+        const responseTime = Date.now() - startTime;
+        monitorNetworkPerformance(responseTime);
+        lastSuccessTime = Date.now();
+        frameDropCount = Math.max(0, frameDropCount - 1); // Reduce drop count on success
+        
+        status.textContent = `Streaming... (${Math.round(blob.size/1024)}KB, ${responseTime}ms, Q:${Math.round(adaptiveQuality*100)}%)`;
+        
         // FPS calculation
         frameCount++;
         const now = performance.now();
         if (!lastFrameTime) lastFrameTime = now;
         if (now - lastFrameTime >= 1000) {
-          fpsDisplay.textContent = `FPS: ${frameCount}`;
+          currentFPS = frameCount;
+          fpsDisplay.textContent = `FPS: ${frameCount} | Target: ${targetFPS} | Latency: ${networkLatency}ms`;
           frameCount = 0;
           lastFrameTime = now;
         }
       } catch (e) {
-        status.textContent = 'Failed to send frame.';
+        frameDropCount++;
+        const responseTime = Date.now() - startTime;
+        
+        if (e.name === 'TimeoutError') {
+          status.textContent = 'Connection timeout - reducing quality';
+          monitorNetworkPerformance(5000); // Simulate high latency
+        } else {
+          status.textContent = `Failed to send frame (${frameDropCount} drops)`;
+          // Exponential backoff on repeated failures
+          const backoffDelay = Math.min(1000, 100 * Math.pow(2, Math.min(frameDropCount, 5)));
+          uploading = false;
+          if (streaming) {
+            setTimeout(sendFrame, backoffDelay);
+          }
+          return;
+        }
       }
+      
       uploading = false;
-      if (streaming) sendFrame();
+      if (streaming) {
+        // Dynamic delay based on performance
+        const nextFrameDelay = Math.max(16, 1000 / targetFPS);
+        setTimeout(sendFrame, nextFrameDelay);
+      }
     }
+
+    qualitySelect.onchange = () => {
+      const qualityValue = qualitySelect.value;
+      if (qualityValue === 'auto') {
+        // Keep adaptive quality enabled
+      } else {
+        const qualityMap = { 'high': 0.8, 'medium': 0.7, 'low': 0.5 };
+        adaptiveQuality = qualityMap[qualityValue] || 0.7;
+        compressionLevel = adaptiveQuality;
+      }
+    };
+
+    maxFpsSelect.onchange = () => {
+      targetFPS = parseInt(maxFpsSelect.value);
+    };
 
     resolutionSelect.onchange = async () => {
       if (streaming) {
