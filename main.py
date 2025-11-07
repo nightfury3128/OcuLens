@@ -284,7 +284,7 @@ def init_virtual_camera(width, height):
             for backend in backends:
                 try:
                     print(f"Trying virtual camera with backend: {backend}")
-                    virtual_cam = pyvirtualcam.Camera(width=width, height=height, fps=30, backend=backend)
+                    virtual_cam = pyvirtualcam.Camera(width=width, height=height, fps=60, backend=backend)
                     print(f"Successfully initialized virtual camera using {backend} backend")
                     break
                 except Exception as e:
@@ -294,7 +294,7 @@ def init_virtual_camera(width, height):
             if virtual_cam is None:
                 raise Exception("No working virtual camera backend found")
         else:
-            virtual_cam = pyvirtualcam.Camera(width=width, height=height, fps=30)
+            virtual_cam = pyvirtualcam.Camera(width=width, height=height, fps=60)
             
         last_shape = (width, height)
         print(f"Virtual camera initialized at {width}x{height}")

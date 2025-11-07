@@ -36,6 +36,7 @@
   <br>
   <label for="maxFps">Max FPS:</label>
   <select id="maxFps">
+    <option value="60">60 FPS</option>
     <option value="30" selected>30 FPS</option>
     <option value="24">24 FPS</option>
     <option value="15">15 FPS</option>
@@ -44,6 +45,7 @@
   <button id="start">Start Streaming</button>
   <p id="status"></p>
   <p id="fpsDisplay"></p>
+  <p id="performanceInfo" style="font-size: 0.9em; color: #666;"></p>
   <script>
     const video = document.getElementById('video');
     const startBtn = document.getElementById('start');
@@ -53,6 +55,7 @@
     const fpsDisplay = document.getElementById('fpsDisplay');
     const qualitySelect = document.getElementById('quality');
     const maxFpsSelect = document.getElementById('maxFps');
+    const performanceInfo = document.getElementById('performanceInfo');
     let streaming = false;
     let cameraStarted = false;
     let uploading = false;
@@ -68,8 +71,8 @@
     
     // Network efficiency variables
     let adaptiveQuality = 0.7;
-    let targetFPS = 30;
-    let currentFPS = 30;
+    let targetFPS = 60;  // Default to 60 FPS
+    let currentFPS = 60;
     let networkLatency = 0;
     let frameDropCount = 0;
     let lastSuccessTime = Date.now();
@@ -133,12 +136,12 @@
       if (responseTime > 1000) {
         // High latency - reduce quality and fps
         adaptiveQuality = Math.max(0.3, adaptiveQuality - 0.1);
-        targetFPS = Math.max(10, targetFPS - 2);
+        targetFPS = Math.max(10, targetFPS - 5);  // More aggressive FPS reduction for 60fps
         compressionLevel = Math.max(0.3, compressionLevel - 0.1);
       } else if (responseTime < 200) {
         // Good connection - gradually increase quality
         adaptiveQuality = Math.min(0.8, adaptiveQuality + 0.05);
-        targetFPS = Math.min(30, targetFPS + 1);
+        targetFPS = Math.min(parseInt(maxFpsSelect.value), targetFPS + 2);  // Use selected max FPS
         compressionLevel = Math.min(0.8, compressionLevel + 0.05);
       }
       
@@ -195,19 +198,51 @@
       try {
         const [w, h] = resolutionSelect.value.split('x').map(Number);
         currentWidth = w;
-        currentHeight = h;        const stream = await navigator.mediaDevices.getUserMedia({
+        currentHeight = h;
+        
+        // Try to get capabilities first
+        let frameRateConstraint = { ideal: parseInt(maxFpsSelect.value) };
+        
+        // Check if selected camera supports high frame rates
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const selectedCamera = devices.find(device => device.deviceId === cameraSelect.value);
+          if (selectedCamera) {
+            const capabilities = selectedCamera.getCapabilities ? selectedCamera.getCapabilities() : null;
+            if (capabilities && capabilities.frameRate) {
+              const maxSupportedFPS = capabilities.frameRate.max || 30;
+              const requestedFPS = parseInt(maxFpsSelect.value);
+              if (requestedFPS > maxSupportedFPS) {
+                frameRateConstraint = { ideal: maxSupportedFPS, max: maxSupportedFPS };
+                console.log(`Camera supports max ${maxSupportedFPS}fps, adjusting from ${requestedFPS}fps`);
+              }
+            }
+          }
+        } catch (capError) {
+          console.log('Could not get camera capabilities, using default constraints');
+        }
+        
+        const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: w },
             height: { ideal: h },
+            frameRate: frameRateConstraint,
             deviceId: { exact: cameraSelect.value }
           },
           audio: false
         });
+        
         video.srcObject = stream;
         cameraStarted = true;
-        status.textContent = `Camera started at ${w}x${h}. Ready to stream.`;
+        
+        // Check actual frame rate achieved
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        const actualFPS = settings.frameRate || 'Unknown';
+        status.textContent = `Camera started at ${w}x${h} @ ${actualFPS}fps. Ready to stream.`;
       } catch (err) {
         status.textContent = 'Camera or microphone access denied or not available.';
+        console.error('Camera error:', err);
       }
     }
 
@@ -219,18 +254,19 @@
         return;
       }
       
-      // Adaptive frame skipping based on target FPS
+      // Adaptive frame skipping based on target FPS - more precise for 60fps
       const frameInterval = 1000 / targetFPS;
       const timeSinceLastFrame = Date.now() - lastSuccessTime;
-      if (timeSinceLastFrame < frameInterval) {
-        setTimeout(sendFrame, frameInterval - timeSinceLastFrame);
+      if (timeSinceLastFrame < frameInterval - 2) {  // 2ms tolerance for 60fps precision
+        const nextFrameDelay = Math.max(1, frameInterval - timeSinceLastFrame);
+        setTimeout(sendFrame, nextFrameDelay);
         return;
       }
       
-      // Skip frames if network is struggling
+      // Skip frames if network is struggling - less aggressive for 60fps
       frameSkipCounter++;
-      if (networkLatency > 500 && frameSkipCounter % 2 === 0) {
-        setTimeout(sendFrame, 50);
+      if (networkLatency > 500 && frameSkipCounter % 3 === 0) {  // Skip every 3rd frame instead of every 2nd
+        setTimeout(sendFrame, 16);  // ~60fps timing
         return;
       }
       
@@ -289,6 +325,10 @@
         
         status.textContent = `Streaming... (${Math.round(blob.size/1024)}KB, ${responseTime}ms, Q:${Math.round(adaptiveQuality*100)}%)`;
         
+        // Performance info for high FPS streaming
+        const efficiency = (currentFPS / parseInt(maxFpsSelect.value) * 100).toFixed(1);
+        performanceInfo.textContent = `Efficiency: ${efficiency}% | Drops: ${frameDropCount} | Adaptive FPS: ${targetFPS}`;
+        
         // FPS calculation
         frameCount++;
         const now = performance.now();
@@ -320,8 +360,10 @@
       
       uploading = false;
       if (streaming) {
-        // Dynamic delay based on performance
-        const nextFrameDelay = Math.max(16, 1000 / targetFPS);
+        // Dynamic delay based on performance - optimized for 60fps
+        const baseDelay = 1000 / targetFPS;
+        const processingTime = Date.now() - startTime;
+        const nextFrameDelay = Math.max(1, baseDelay - processingTime);  // Account for processing time
         setTimeout(sendFrame, nextFrameDelay);
       }
     }
@@ -338,7 +380,19 @@
     };
 
     maxFpsSelect.onchange = () => {
-      targetFPS = parseInt(maxFpsSelect.value);
+      const selectedFPS = parseInt(maxFpsSelect.value);
+      targetFPS = selectedFPS;
+      
+      // Reset adaptive quality when changing FPS target
+      if (selectedFPS === 60) {
+        adaptiveQuality = 0.6;  // Start with slightly lower quality for 60fps
+        compressionLevel = 0.6;
+      } else {
+        adaptiveQuality = 0.7;  // Default quality for lower fps
+        compressionLevel = 0.7;
+      }
+      
+      console.log(`Target FPS changed to: ${selectedFPS}`);
     };
 
     resolutionSelect.onchange = async () => {
